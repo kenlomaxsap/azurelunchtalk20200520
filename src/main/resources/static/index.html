@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Playing with real-time data with sockets and eventhubs..</title>
+<link rel="stylesheet"
+	href="https://unpkg.com/purecss@2.0.3/build/pure-min.css"
+	integrity="sha384-cg6SkqEOCV1NbJoCu11+bm0NvBRc8IYLRGXkmNrqUBfTjmMYwNKPWBTIKyw9mHNJ"
+	crossorigin="anonymous">
+
+<script type="text/javascript"
+	src="//ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.js"></script>
+</head>
+<body>
+
+	<h1>Real-time data on Azure with websockets and eventhubs..</h1>
+	<h3>Color in the circles better than the other players..</h3>
+	<table>
+		<tr>
+			<td>Color in the circles better than the other players..<br>
+				<b>Websockets:</b><br> send mouse movements (via JSON) from
+				client to server<br> send moust movements (via JSON) from
+				server to all clients<br> <b>EventHub (and EventHub stub)</b><br>
+				collect mouse movements for retrieval and processing (like Kafka) <br>
+				<b>Micro service</b><br> extract mouse data from Event Hub to
+				calculate real-time scores. <br> post score (via HTTP Post) to
+				WebApp, that shares score with all players (via Websocket)<br>
+				<b>Eventhub Query Job</b> to perform stream analysis (think Kafka..)
+			</td>
+			<td><img width=630 height=250 src="/EventsLT.jpg"></td>
+		</tr>
+	</table>
+	<form onsubmit="return false;" action="#" name="myForm" action="dummyAction" onsubmit="dummySubmit" method="dummyPost">
+		You are <input type="text" id="patriot"><br>
+		<canvas id="canvas" width="250" height="250"></canvas>
+		<canvas id="jointcanvas" width="450" height="250"></canvas>
+		<br> Scoring: 	<p id="report" cols="100" rows="50">..</p>
+	</form>
+
+	<script type="text/javascript">		
+		var uuid = createId(); 			
+		var dragging = false;				
+    	var userCount = -1;
+    	var patriot = "Unknown";
+    	var west=0, north=0, radius=0;
+		var round = 0;	
+		var debug = new URLSearchParams(window.location.search).get('debug') == "true";		
+	
+		// Canvas logic..
+    	var canvas1 = document.getElementById('canvas').getContext("2d");
+    	var canvas2 = document.getElementById('jointcanvas').getContext("2d");
+		
+		$('#canvas').mousedown(function(e){					
+			dragging = true; 
+			plotAndTx(e.pageX - this.offsetLeft, e.pageY - this.offsetTop );
+		});
+	   	
+	   	$('#canvas').mousemove(function(e){
+			if(dragging)	  		
+				plotAndTx(e.pageX - this.offsetLeft, e.pageY - this.offsetTop );
+		});
+	   	
+	   	$('#canvas').mouseup(function(e){
+			dragging = false;
+	   	});
+	   	
+	   	$('#canvas').mouseleave(function(e){
+			dragging = false;
+	   	}); 		
+		
+	   	// Socket logic..
+    	var socket = new WebSocket('ws://' + window.location.host + '/sockets?id='+uuid);			
+		
+	   	socket.onopen = function() {			
+			log(' WebSocket opened for '+uuid);
+			cls();
+		};
+		
+		socket.onmessage = function(message) {     	
+        	var msgs = parseJson(message.data);  	
+			msgs.forEach( msg => {
+				switch (msg.type){
+				 case "userCount":				
+					userCount = msg.data;
+					document.getElementById("patriot").value = "User"+userCount;	
+					patriot = "User"+msg.data;
+					break;    
+				 case  "draw":
+					plot( msg.x, msg.y, msg.w, msg.n, msg.userCount );	
+					break;
+				 case "newtarget":
+					round++;					
+					cls();
+					dragging = false;	
+					west = 1.0 * msg.west;
+					north = 1.0 * msg.north;
+					radius = 1.0 * msg.radius;
+					canvas1.lineWidth = 1;
+					canvas1.beginPath();			
+					canvas1.arc(west, north, radius, 0, 2 * Math.PI);
+					canvas1.stroke();
+					break;
+				 case "report" :				
+					document.getElementById('report').innerHTML = msg.data.split(',').join("<br>").replace(/\=/g," ").replace(/\[/g,"").replace(/\]/g,"");
+					break;	
+				}
+			});
+        }    
+   
+    	function plot( x, y, w, n, c ){
+			canvas2.lineWidth = 1;			
+			canvas2.fillRect( 25 + 25 * (c%6) + x-w, 25+25*(Math.floor( c / 6) )+y-n, 1,1);	  
+        }
+    	
+		function plotAndTx( x, y ){
+			canvas1.lineWidth = 1;		 
+			canvas1.fillRect(x,y, 1,1);	  
+			socket.send(  '{"type":"draw",'+
+						  '"id":"'+uuid+'",'+
+						  '"patriot":"'+patriot+'",'+
+						  '"x":'+x+','+
+						  '"y":'+y+','+
+						  '"round":'+round+','+
+						  '"n":'+north+','+
+						  '"w":'+west+','+
+						  '"r":'+radius+','+
+						  '"now":'+ Math.round(new Date().getTime() / 1000) +','+ 
+						  '"userCount":'+userCount+'}');	          	
+        }
+    	  	
+    	function cls(){
+			canvas1.fillStyle = "#dddddd";
+    		canvas1.lineWidth = 1;
+  		  	canvas1.fillRect(0, 0, canvas1.canvas.width, canvas1.canvas.height); // Clears the canvas	
+	  		canvas1.fillStyle = "black"
+	  		
+  		  	canvas2.fillStyle = "#dddddd";
+      		canvas2.lineWidth = 1;
+    		canvas2.fillRect(0, 0, canvas2.canvas.width, canvas2.canvas.height); // Clears the canvas	
+    		canvas2.fillStyle = "black"
+    	}  
+
+		function log(s){
+			if (debug)
+				console.log(s);
+		}
+		
+		function createId() {
+			return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+				var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+				return v.toString(16);
+			});
+		}
+		
+		function parseJson( json ){
+			var rx;
+			log( json);     	
+        	try {
+        		rx = JSON.parse (json);	
+       		}
+       		catch(err) {
+       		  console.log("Error parsing "+ json);
+       		  
+       		}
+       		if (!Array.isArray(rx)){
+       			console.log("Expected Array instead got" +  json)
+       		}
+       		return rx;
+		}
+</script>
+</body>
+</html>
